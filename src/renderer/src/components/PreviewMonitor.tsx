@@ -29,6 +29,8 @@ export const PreviewMonitor: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeVideoSrcRef = useRef<string>('')
   const activeAudioSrcRef = useRef<string>('')
+  const targetVideoTimeRef = useRef<number>(0)
+  const targetAudioTimeRef = useRef<number>(0)
 
   const clipsById = useMemo(() => new Map(clips.map((c) => [c.id, c])), [clips])
   const computedV = useMemo(() => computeTrackLayout(videoSegments), [videoSegments])
@@ -83,11 +85,16 @@ export const PreviewMonitor: React.FC = () => {
       return
     }
 
+    targetVideoTimeRef.current = hitV.sourceTime
     const mediaUrl = videoStitchClient.toMediaUrl(vClip.filePath)
     if (activeVideoSrcRef.current !== mediaUrl) {
       activeVideoSrcRef.current = mediaUrl
       vEl.src = mediaUrl
-      vEl.currentTime = hitV.sourceTime
+      try {
+        vEl.currentTime = hitV.sourceTime
+      } catch {
+        // loading metadata
+      }
     }
 
     const targetRate = Math.min(4, Math.max(0.25, hitV.segment.speed))
@@ -132,11 +139,16 @@ export const PreviewMonitor: React.FC = () => {
       return
     }
 
+    targetAudioTimeRef.current = hitA.sourceTime
     const mediaUrl = videoStitchClient.toMediaUrl(aClip.filePath)
     if (activeAudioSrcRef.current !== mediaUrl) {
       activeAudioSrcRef.current = mediaUrl
       aEl.src = mediaUrl
-      aEl.currentTime = hitA.sourceTime
+      try {
+        aEl.currentTime = hitA.sourceTime
+      } catch {
+        // loading metadata
+      }
     }
 
     aEl.preservesPitch = true
@@ -186,11 +198,32 @@ export const PreviewMonitor: React.FC = () => {
             ref={videoRef}
             muted
             playsInline
+            onLoadedMetadata={() => {
+              if (videoRef.current) {
+                try {
+                  videoRef.current.currentTime = targetVideoTimeRef.current
+                } catch {
+                  // ignore
+                }
+              }
+            }}
             className={`max-w-full max-h-full object-contain ${
               hasVisibleVideo ? 'opacity-100' : 'opacity-0'
             }`}
           />
-          <audio ref={audioRef} className="hidden" />
+          <audio
+            ref={audioRef}
+            className="hidden"
+            onLoadedMetadata={() => {
+              if (audioRef.current) {
+                try {
+                  audioRef.current.currentTime = targetAudioTimeRef.current
+                } catch {
+                  // ignore
+                }
+              }
+            }}
+          />
 
           {!hasVisibleVideo && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 pointer-events-none">

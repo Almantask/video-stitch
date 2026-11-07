@@ -13,7 +13,7 @@ import type {
   TimelineSegment
 } from '../../shared/types'
 import { getFfmpegBins } from './locator'
-import { buildStitchCommandPlan, type StitchCommandPlan } from './stitchBuilder'
+import { buildStitchCommandPlan, parseResolution, type StitchCommandPlan } from './stitchBuilder'
 
 const CHUNK_SIZE = 10
 const activeProcesses = new Map<string, { proc: ChildProcess; canceled: boolean }>()
@@ -252,6 +252,9 @@ async function preRenderLargeTrackIfNeeded(params: {
   })
 
   const syntheticId = `merged_${track}_${randomUUID()}`
+  const { width: targetW, height: targetH } = parseResolution(
+    params.request.settings.resolution
+  )
   const nextClips = new Map(params.clipsById)
   nextClips.set(syntheticId, {
     id: syntheticId,
@@ -259,8 +262,8 @@ async function preRenderLargeTrackIfNeeded(params: {
     fileName: `merged_${track}.${mergedExt}`,
     fileSize: 0,
     duration: totalDur,
-    width: 1920,
-    height: 1080,
+    width: targetW,
+    height: targetH,
     fps: params.request.settings.fps,
     videoCodec: track === 'video' ? 'h264' : 'none',
     hasVideo: track === 'video',
@@ -536,7 +539,11 @@ export function cancelExportJob(jobId: string): boolean {
   if (!entry) return false
   entry.canceled = true
   if (entry.proc && !entry.proc.killed) {
-    entry.proc.kill('SIGKILL')
+    try {
+      entry.proc.kill()
+    } catch {
+      // process may have already exited
+    }
   }
   return true
 }

@@ -12,8 +12,10 @@ export function clampSpeed(speed: number): number {
 export function getSegmentTimelineDuration(
   seg: Pick<TimelineSegment, 'sourceIn' | 'sourceOut' | 'speed'>
 ): number {
-  const rawLen = Math.max(0, seg.sourceOut - seg.sourceIn)
-  const spd = seg.speed > 0 ? seg.speed : 1
+  const inPt = Number.isFinite(seg.sourceIn) ? seg.sourceIn : 0
+  const outPt = Number.isFinite(seg.sourceOut) ? seg.sourceOut : 0
+  const rawLen = Math.max(0, outPt - inPt)
+  const spd = Number.isFinite(seg.speed) && seg.speed > 0 ? seg.speed : 1
   return rawLen / spd
 }
 
@@ -52,16 +54,19 @@ export function findSegmentAtTime(
   computedTrack: readonly ComputedTimelineSegment[],
   timelineTime: number
 ): ActiveSegmentLookup | null {
-  if (computedTrack.length === 0 || timelineTime < 0) return null
+  if (!Number.isFinite(timelineTime) || computedTrack.length === 0 || timelineTime < 0) return null
 
   for (let i = 0; i < computedTrack.length; i++) {
     const seg = computedTrack[i]
     const isLast = i === computedTrack.length - 1
     const within =
       timelineTime >= seg.timelineStart &&
-      (timelineTime < seg.timelineEnd || (isLast && timelineTime <= seg.timelineEnd + 1e-4))
+      (timelineTime < seg.timelineEnd || (isLast && timelineTime >= seg.timelineStart))
     if (within) {
-      const localElapsed = Math.max(0, timelineTime - seg.timelineStart)
+      const localElapsed = Math.min(
+        seg.timelineDuration,
+        Math.max(0, timelineTime - seg.timelineStart)
+      )
       const sourceTime = Math.min(seg.sourceOut, seg.sourceIn + localElapsed * seg.speed)
       return { segment: seg, index: i, sourceTime }
     }
@@ -83,6 +88,7 @@ export function splitSegmentAtTimelineTime(
   newRightLinkGroupId: string | null
 ): [TimelineSegment, TimelineSegment] | null {
   if (
+    !Number.isFinite(timelineSplitTime) ||
     timelineSplitTime <= computedSeg.timelineStart ||
     timelineSplitTime >= computedSeg.timelineEnd
   ) {
@@ -127,9 +133,14 @@ export function trimSegmentBounds(
   nextOut: number,
   maxClipDuration: number
 ): TimelineSegment {
-  const safeMax = Math.max(MIN_SEGMENT_SOURCE_DURATION, maxClipDuration)
-  let clampedIn = Math.max(0, Math.min(nextIn, safeMax - MIN_SEGMENT_SOURCE_DURATION))
-  let clampedOut = Math.min(safeMax, Math.max(nextOut, clampedIn + MIN_SEGMENT_SOURCE_DURATION))
+  const safeIn = Number.isFinite(nextIn) ? nextIn : seg.sourceIn
+  const safeOut = Number.isFinite(nextOut) ? nextOut : seg.sourceOut
+  const safeMax = Number.isFinite(maxClipDuration)
+    ? Math.max(MIN_SEGMENT_SOURCE_DURATION, maxClipDuration)
+    : Math.max(MIN_SEGMENT_SOURCE_DURATION, seg.sourceOut)
+
+  let clampedIn = Math.max(0, Math.min(safeIn, safeMax - MIN_SEGMENT_SOURCE_DURATION))
+  let clampedOut = Math.min(safeMax, Math.max(safeOut, clampedIn + MIN_SEGMENT_SOURCE_DURATION))
 
   if (clampedOut - clampedIn < MIN_SEGMENT_SOURCE_DURATION) {
     clampedIn = Math.max(0, clampedOut - MIN_SEGMENT_SOURCE_DURATION)

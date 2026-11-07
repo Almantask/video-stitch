@@ -37,6 +37,15 @@ export const ExportModal: React.FC = () => {
 
   useEffect(() => {
     if (!open) return
+    if (videoSegments.length === 0 && audioSegments.length > 0) {
+      setMode('audio-only')
+    } else if (audioSegments.length === 0 && videoSegments.length > 0 && mode === 'audio-only') {
+      setMode('video-only')
+    }
+  }, [open, videoSegments.length, audioSegments.length, mode])
+
+  useEffect(() => {
+    if (!open) return
     const unsubscribe = videoStitchClient.onExportProgress((ev) => {
       setProgress(ev)
     })
@@ -48,6 +57,11 @@ export const ExportModal: React.FC = () => {
   const vTotal = getTrackTotalDuration(videoSegments)
   const aTotal = getTrackTotalDuration(audioSegments)
   const isExporting = Boolean(activeJobId)
+
+  const hasVideoContent = videoSegments.length > 0
+  const hasAudioContent = audioSegments.length > 0
+  const isModeInvalid =
+    (mode !== 'audio-only' && !hasVideoContent) || (mode === 'audio-only' && !hasAudioContent)
 
   const handleStartExport = async (): Promise<void> => {
     setErrorMsg(null)
@@ -257,6 +271,15 @@ export const ExportModal: React.FC = () => {
             </div>
           )}
 
+          {/* Validation Warning */}
+          {isModeInvalid && (
+            <div className="p-3 rounded-lg bg-amber-500/15 border border-amber-500/35 text-amber-300 text-[11px]">
+              {mode === 'audio-only'
+                ? 'Audio track (A1) has no segments to export. Add audio files or choose a video mode.'
+                : 'Video track (V1) has no segments to export. Add video files or choose Audio Only.'}
+            </div>
+          )}
+
           {/* Error banner */}
           {errorMsg && (
             <div className="p-3 rounded-lg bg-red-500/15 border border-red-500/35 text-red-300 text-[11px] max-h-28 overflow-y-auto whitespace-pre-wrap">
@@ -317,8 +340,9 @@ export const ExportModal: React.FC = () => {
               </button>
               <button
                 type="button"
+                disabled={isModeInvalid}
                 onClick={handleStartExport}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 Choose Destination &amp; Export

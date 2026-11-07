@@ -74,4 +74,114 @@ describe('FFmpeg Stitch Filtergraph Builder', () => {
     expect(plan.filterComplexScript).toContain('[vpad_tail]')
     expect(plan.mapArgs).toEqual(['-map', '[vout]', '-map', '[aout]'])
   })
+
+  it('supports vertical resolution (1080x1920) and trims audio when durationPolicy is video', () => {
+    const clipA: SourceClip = {
+      id: 'a',
+      filePath: 'E:\\a.mp4',
+      fileName: 'a.mp4',
+      fileSize: 1000,
+      duration: 10,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      videoCodec: 'h264',
+      hasVideo: true,
+      hasAudio: true,
+      audioCodec: 'aac',
+      thumbnailPath: null,
+      waveformPeaks: []
+    }
+
+    const vSeg: TimelineSegment = {
+      id: 'v1',
+      sourceClipId: 'a',
+      label: 'a.mp4',
+      track: 'video',
+      linkGroupId: null,
+      sourceIn: 0,
+      sourceOut: 4,
+      speed: 1, // 4s video
+      muted: false,
+      volume: 1
+    }
+
+    const aSeg: TimelineSegment = {
+      id: 'a1',
+      sourceClipId: 'a',
+      label: 'a.mp4',
+      track: 'audio',
+      linkGroupId: null,
+      sourceIn: 0,
+      sourceOut: 9,
+      speed: 1, // 9s audio
+      muted: false,
+      volume: 1
+    }
+
+    const plan = buildStitchCommandPlan({
+      clipsById: new Map([['a', clipA]]),
+      videoSegments: [vSeg],
+      audioSegments: [aSeg],
+      includeVideo: true,
+      includeAudio: true,
+      resolution: '1080x1920',
+      fps: 30,
+      durationPolicy: 'video'
+    })
+
+    expect(plan.expectedDurationSec).toBeCloseTo(4)
+    expect(plan.filterComplexScript).toContain('scale=1080:1920')
+    expect(plan.filterComplexScript).toContain('pad=1080:1920')
+    expect(plan.filterComplexScript).toContain('atrim=duration=4.0000')
+    expect(plan.mapArgs).toEqual(['-map', '[vout]', '-map', '[aout]'])
+  })
+
+  it('generates silent audio fill when combined export is requested but audio track is empty', () => {
+    const clipA: SourceClip = {
+      id: 'a',
+      filePath: 'E:\\a.mp4',
+      fileName: 'a.mp4',
+      fileSize: 1000,
+      duration: 5,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      videoCodec: 'h264',
+      hasVideo: true,
+      hasAudio: false,
+      audioCodec: null,
+      thumbnailPath: null,
+      waveformPeaks: []
+    }
+
+    const vSeg: TimelineSegment = {
+      id: 'v1',
+      sourceClipId: 'a',
+      label: 'a.mp4',
+      track: 'video',
+      linkGroupId: null,
+      sourceIn: 0,
+      sourceOut: 5,
+      speed: 1,
+      muted: false,
+      volume: 1
+    }
+
+    const plan = buildStitchCommandPlan({
+      clipsById: new Map([['a', clipA]]),
+      videoSegments: [vSeg],
+      audioSegments: [],
+      includeVideo: true,
+      includeAudio: true,
+      resolution: '1920x1080',
+      fps: 30,
+      durationPolicy: 'longest'
+    })
+
+    expect(plan.hasVideoOutput).toBe(true)
+    expect(plan.hasAudioOutput).toBe(true)
+    expect(plan.filterComplexScript).toContain('anullsrc=channel_layout=stereo:sample_rate=48000')
+    expect(plan.filterComplexScript).toContain('[aseg_fill]')
+  })
 })

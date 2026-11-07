@@ -125,4 +125,105 @@ describe('Timeline Math & Dual-Track Project Store', () => {
     useProjectStore.temporal.getState().undo()
     expect(useProjectStore.getState().videoSegments).toHaveLength(2)
   })
+
+  it('safely guards against NaN or infinite inputs in duration and trim bounds', () => {
+    const seg: TimelineSegment = {
+      id: 's1',
+      sourceClipId: 'c1',
+      label: 'clip.mp4',
+      track: 'video',
+      linkGroupId: null,
+      sourceIn: 1,
+      sourceOut: 5,
+      speed: 1,
+      muted: false,
+      volume: 1
+    }
+
+    expect(getSegmentTimelineDuration({ sourceIn: NaN, sourceOut: 6, speed: 2 })).toBeCloseTo(3)
+    expect(getSegmentTimelineDuration({ sourceIn: 2, sourceOut: NaN, speed: 1 })).toBeCloseTo(0)
+    expect(getSegmentTimelineDuration({ sourceIn: 0, sourceOut: 5, speed: NaN })).toBeCloseTo(5)
+
+    const trimmedNaN = trimSegmentBounds(seg, NaN, NaN, 10)
+    expect(trimmedNaN.sourceIn).toBe(1)
+    expect(trimmedNaN.sourceOut).toBe(5)
+  })
+
+  it('retains last frame at or past timeline end in findSegmentAtTime', () => {
+    const seg: TimelineSegment = {
+      id: 's1',
+      sourceClipId: 'c1',
+      label: 'clip.mp4',
+      track: 'video',
+      linkGroupId: null,
+      sourceIn: 0,
+      sourceOut: 10,
+      speed: 1,
+      muted: false,
+      volume: 1
+    }
+
+    const layout = computeTrackLayout([seg])
+    const atEnd = findSegmentAtTime(layout, 10.0)
+    expect(atEnd).not.toBeNull()
+    expect(atEnd?.sourceTime).toBeCloseTo(10.0)
+
+    const pastEnd = findSegmentAtTime(layout, 12.5)
+    expect(pastEnd).not.toBeNull()
+    expect(pastEnd?.sourceTime).toBeCloseTo(10.0)
+  })
+
+  it('avoids cross-track linkGroupId contamination when splitting unpartnered segments', () => {
+    useProjectStore.getState().addImportedVideoClips([
+      makeMockClip('c1', 'clip_1.mp4', 10),
+      makeMockClip('c2', 'clip_2.mp4', 10)
+    ])
+
+    let state = useProjectStore.getState()
+    // Break linkage and reorder audio track so V1[0] is c1 and A1[0] is c2
+    state.setLinkEnabled(false)
+    state.unlinkSegmentPair(state.videoSegments[0].id)
+    state.reorderTrackSegment('audio', state.audioSegments[1].id, state.audioSegments[0].id)
+
+    state = useProjectStore.getState()
+    // Now V1[0] is c1, A1[0] is c2
+    expect(state.videoSegments[0].sourceClipId).toBe('c1')
+    expect(state.audioSegments[0].sourceClipId).toBe('c2')
+
+    // Split at 3s on both tracks
+    state.setPlayheadSec(3)
+    const didSplit = state.splitAtPlayhead('both')
+    expect(didSplit).toBe(true)
+
+    state = useProjectStore.getState()
+    const rightV = state.videoSegments[1]
+    const rightA = state.audioSegments[1]
+
+    // Ensure V1 and A1 did NOT accidentally get cross-linked together
+    expect(rightV.linkGroupId).not.toEqual(rightA.linkGroupId)
+  })
+
+  it('wraps playhead from end to 0 on togglePlayPause and clamps playhead on delete', () => {
+    useProjectStore.getState().addImportedVideoClips([makeMockClip('c1', 'clip_1.mp4', 5)])
+
+    // Move playhead to end
+    useProjectStore.getState().setPlayheadSec(5)
+    expect(useProjectStore.getState().playheadSec).toBeCloseTo(5)
+
+    // ArrowRight / excessive seek should clamp to max content duration
+    useProjectStore.getState().setPlayheadSec(999)
+    expect(useProjectStore.getState().playheadSec).toBeCloseTo(5)
+
+    // togglePlayPause should restart from 0
+    useProjectStore.getState().togglePlayPause()
+    expect(useProjectStore.getState().playheadSec).toBe(0)
+    expect(useProjectStore.getState().isPlaying).toBe(true)
+
+    // Shorten timeline via delete and ensure playhead clamps
+    useProjectStore.getState().setIsPlaying(false)
+    useProjectStore.getState().setPlayheadSec(4)
+    useProjectStore.getState().setLinkEnabled(true)
+    useProjectStore.getState().deleteSegment(useProjectStore.getState().videoSegments[0].id)
+    expect(useProjectStore.getState().playheadSec).toBeCloseTo(0)
+  })
 })

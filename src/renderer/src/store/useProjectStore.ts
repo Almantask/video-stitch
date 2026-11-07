@@ -6,6 +6,7 @@ import {
   clampSpeed,
   computeTrackLayout,
   findSegmentAtTime,
+  getTrackTotalDuration,
   splitSegmentAtTimelineTime,
   trimSegmentBounds
 } from '@shared/timelineMath'
@@ -168,12 +169,28 @@ export const useProjectStore = create<ProjectState>()(
       setExportModalOpen: (exportModalOpen) => set({ exportModalOpen, isPlaying: false }),
       setLinkEnabled: (linkEnabled) => set({ linkEnabled }),
       selectSegment: (selectedSegmentId) => set({ selectedSegmentId }),
-      setPlayheadSec: (sec) => set({ playheadSec: Math.max(0, sec) }),
+      setPlayheadSec: (sec) => {
+        const state = get()
+        const maxDur = Math.max(
+          getTrackTotalDuration(state.videoSegments),
+          getTrackTotalDuration(state.audioSegments)
+        )
+        const safeMax = maxDur > 0 ? maxDur : 0
+        set({ playheadSec: Math.max(0, Math.min(safeMax, Number.isFinite(sec) ? sec : 0)) })
+      },
       setIsPlaying: (isPlaying) => set({ isPlaying }),
       togglePlayPause: () => {
         const state = get()
-        if (state.videoSegments.length === 0 && state.audioSegments.length === 0) return
-        set({ isPlaying: !state.isPlaying })
+        const total = Math.max(
+          getTrackTotalDuration(state.videoSegments),
+          getTrackTotalDuration(state.audioSegments)
+        )
+        if (total <= 0) return
+        if (!state.isPlaying && state.playheadSec >= total - 0.05) {
+          set({ playheadSec: 0, isPlaying: true })
+        } else {
+          set({ isPlaying: !state.isPlaying })
+        }
       },
       setZoomPxPerSec: (px) =>
         set({ zoomPxPerSec: Math.min(240, Math.max(12, Math.round(px))) }),
@@ -357,55 +374,65 @@ export const useProjectStore = create<ProjectState>()(
           }
         }
 
-        const rightSharedLinkId = makeId('lnk')
+        const hitV = splitV ? findSegmentAtTime(computedV, t) : null
+        const hitA = splitA ? findSegmentAtTime(computedA, t) : null
+
+        const areLinkedPartners = Boolean(
+          hitV &&
+            hitA &&
+            hitV.segment.linkGroupId &&
+            hitV.segment.linkGroupId === hitA.segment.linkGroupId
+        )
+
+        const rightVLinkId = hitV?.segment.linkGroupId ? makeId('lnk') : null
+        const rightALinkId = areLinkedPartners
+          ? rightVLinkId
+          : hitA?.segment.linkGroupId
+            ? makeId('lnk')
+            : null
+
         let nextV = state.videoSegments
         let nextA = state.audioSegments
         let didSplit = false
         let nextSelected = state.selectedSegmentId
 
-        if (splitV) {
-          const hitV = findSegmentAtTime(computedV, t)
-          if (hitV) {
-            const pair = splitSegmentAtTimelineTime(
-              hitV.segment,
-              t,
-              makeId('vseg'),
-              makeId('vseg'),
-              hitV.segment.linkGroupId ? rightSharedLinkId : null
-            )
-            if (pair) {
-              nextV = [
-                ...state.videoSegments.slice(0, hitV.index),
-                pair[0],
-                pair[1],
-                ...state.videoSegments.slice(hitV.index + 1)
-              ]
-              nextSelected = pair[1].id
-              didSplit = true
-            }
+        if (splitV && hitV) {
+          const pair = splitSegmentAtTimelineTime(
+            hitV.segment,
+            t,
+            makeId('vseg'),
+            makeId('vseg'),
+            rightVLinkId
+          )
+          if (pair) {
+            nextV = [
+              ...state.videoSegments.slice(0, hitV.index),
+              pair[0],
+              pair[1],
+              ...state.videoSegments.slice(hitV.index + 1)
+            ]
+            nextSelected = pair[1].id
+            didSplit = true
           }
         }
 
-        if (splitA) {
-          const hitA = findSegmentAtTime(computedA, t)
-          if (hitA) {
-            const pair = splitSegmentAtTimelineTime(
-              hitA.segment,
-              t,
-              makeId('aseg'),
-              makeId('aseg'),
-              hitA.segment.linkGroupId ? rightSharedLinkId : null
-            )
-            if (pair) {
-              nextA = [
-                ...state.audioSegments.slice(0, hitA.index),
-                pair[0],
-                pair[1],
-                ...state.audioSegments.slice(hitA.index + 1)
-              ]
-              if (!splitV) nextSelected = pair[1].id
-              didSplit = true
-            }
+        if (splitA && hitA) {
+          const pair = splitSegmentAtTimelineTime(
+            hitA.segment,
+            t,
+            makeId('aseg'),
+            makeId('aseg'),
+            rightALinkId
+          )
+          if (pair) {
+            nextA = [
+              ...state.audioSegments.slice(0, hitA.index),
+              pair[0],
+              pair[1],
+              ...state.audioSegments.slice(hitA.index + 1)
+            ]
+            if (!splitV) nextSelected = pair[1].id
+            didSplit = true
           }
         }
 
@@ -445,9 +472,17 @@ export const useProjectStore = create<ProjectState>()(
             return seg
           })
 
+        const nextV = updateList(state.videoSegments)
+        const nextA = updateList(state.audioSegments)
+        const nextTotal = Math.max(
+          getTrackTotalDuration(nextV),
+          getTrackTotalDuration(nextA)
+        )
+
         set({
-          videoSegments: updateList(state.videoSegments),
-          audioSegments: updateList(state.audioSegments),
+          videoSegments: nextV,
+          audioSegments: nextA,
+          playheadSec: Math.min(state.playheadSec, nextTotal),
           hasManualEdits: true
         })
       },
@@ -471,9 +506,17 @@ export const useProjectStore = create<ProjectState>()(
             return seg
           })
 
+        const nextV = updateList(state.videoSegments)
+        const nextA = updateList(state.audioSegments)
+        const nextTotal = Math.max(
+          getTrackTotalDuration(nextV),
+          getTrackTotalDuration(nextA)
+        )
+
         set({
-          videoSegments: updateList(state.videoSegments),
-          audioSegments: updateList(state.audioSegments),
+          videoSegments: nextV,
+          audioSegments: nextA,
+          playheadSec: Math.min(state.playheadSec, nextTotal),
           hasManualEdits: true
         })
       },
@@ -548,11 +591,16 @@ export const useProjectStore = create<ProjectState>()(
 
         const nextV = state.videoSegments.filter((s) => !shouldRemove(s))
         const nextA = state.audioSegments.filter((s) => !shouldRemove(s))
+        const nextTotal = Math.max(
+          getTrackTotalDuration(nextV),
+          getTrackTotalDuration(nextA)
+        )
 
         set({
           videoSegments: nextV,
           audioSegments: nextA,
           selectedSegmentId: nextV[0]?.id ?? nextA[0]?.id ?? null,
+          playheadSec: Math.min(state.playheadSec, nextTotal),
           hasManualEdits: true
         })
       },
@@ -562,6 +610,10 @@ export const useProjectStore = create<ProjectState>()(
         const nextClips = state.clips.filter((c) => c.id !== clipId)
         const nextV = state.videoSegments.filter((s) => s.sourceClipId !== clipId)
         const nextA = state.audioSegments.filter((s) => s.sourceClipId !== clipId)
+        const nextTotal = Math.max(
+          getTrackTotalDuration(nextV),
+          getTrackTotalDuration(nextA)
+        )
         set({
           clips: nextClips,
           videoSegments: nextV,
@@ -572,6 +624,7 @@ export const useProjectStore = create<ProjectState>()(
               nextA.some((s) => s.id === state.selectedSegmentId))
               ? state.selectedSegmentId
               : (nextV[0]?.id ?? nextA[0]?.id ?? null),
+          playheadSec: Math.min(state.playheadSec, nextTotal),
           hasManualEdits: nextClips.length > 0
         })
       },

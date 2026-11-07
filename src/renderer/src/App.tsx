@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { UploadCloud } from 'lucide-react'
+import { getTrackTotalDuration } from '@shared/timelineMath'
 import { stageBrowserFiles, videoStitchClient } from './lib/videoStitchClient'
 import { useProjectStore } from './store/useProjectStore'
 import { ExportModal } from './components/ExportModal'
@@ -163,7 +164,11 @@ export const App: React.FC = () => {
       if (e.key === 'ArrowRight') {
         e.preventDefault()
         state.setIsPlaying(false)
-        state.setPlayheadSec(state.playheadSec + (e.shiftKey ? 1 : 0.1))
+        const total = Math.max(
+          getTrackTotalDuration(state.videoSegments),
+          getTrackTotalDuration(state.audioSegments)
+        )
+        state.setPlayheadSec(Math.min(total, state.playheadSec + (e.shiftKey ? 1 : 0.1)))
       }
     }
 
