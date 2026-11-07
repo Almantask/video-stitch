@@ -51,9 +51,16 @@
     ],
     "win": {
       "target": [
-        "dir"
-      ],
-      "signAndEditExecutable": false
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Video Stitch"
     }
   }
 }
